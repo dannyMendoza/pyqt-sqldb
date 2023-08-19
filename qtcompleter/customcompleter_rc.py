@@ -1,0 +1,82 @@
+# Resource object code (Python 3)
+# Created by: object code
+# Created by: The Resource Compiler for Qt version 6.5.1
+# WARNING! All changes made in this file will be lost!
+
+from PySide6 import QtCore
+
+qt_resource_data = b"\
+\x00\x00\x02\xac\
+a\
+dd\x0aADD\x0aall\x0aALL\x0aa\
+lter\x0aALTER\x0aand\x0aA\
+ND\x0aany\x0aANY\x0aas\x0aAS\
+\x0aasc\x0aASC\x0abackup\x0a\
+BACKUP\x0abetween\x0aB\
+ETWEEN\x0aby\x0aBY\x0acas\
+e\x0aCASE\x0acheck\x0aCHE\
+CK\x0acolumn\x0aCOLUMN\
+\x0aconstraint\x0aCONS\
+TRAINT\x0acreate\x0aCR\
+EATE\x0adatabase\x0aDA\
+TABASE\x0adefault\x0aD\
+EFAULT\x0adelete\x0aDE\
+LETE\x0adesc\x0aDESC\x0ad\
+istinct\x0aDISTINCT\
+\x0adrop\x0aDROP\x0aexec\x0a\
+EXEC\x0aexists\x0aEXIS\
+TS\x0aforeign\x0aFOREI\
+GN\x0afrom\x0aFROM\x0aful\
+l\x0aFULL\x0agroup\x0aGRO\
+UP\x0ahaving\x0aHAVING\
+\x0ain\x0aIN\x0aindex\x0aIND\
+EX\x0ainner\x0aINNER\x0ai\
+nsert\x0aINSERT\x0ais\x0a\
+IS\x0ajoin\x0aJOIN\x0akey\
+\x0aKEY\x0aleft\x0aLEFT\x0al\
+ike\x0aLIKE\x0alimit\x0aL\
+IMIT\x0anot\x0aNOT\x0anul\
+l\x0aNULL\x0aor\x0aOR\x0aord\
+er\x0aORDER\x0aouter\x0aO\
+UTER\x0aprimary\x0aPRI\
+MARY\x0aprocedure\x0aP\
+ROCEDURE\x0aright\x0aR\
+IGHT\x0arownum\x0aROWN\
+UM\x0aselect\x0aSELECT\
+\x0aset\x0aSET\x0atable\x0aT\
+ABLE\x0atop\x0aTOP\x0atru\
+ncate\x0aTRUNCATE\x0au\
+nion\x0aUNION\x0auniqu\
+e\x0aUNIQUE\x0aupdate\x0a\
+UPDATE\x0avalues\x0aVA\
+LUES\x0aview\x0aVIEW\x0aw\
+here\x0aWHERE\x0a\
+"
+
+qt_resource_name = b"\
+\x00\x09\
+\x0alxC\
+\x00r\
+\x00e\x00s\x00o\x00u\x00r\x00c\x00e\x00s\
+\x00\x0c\
+\x0fjM\x94\
+\x00w\
+\x00o\x00r\x00d\x00l\x00i\x00s\x00t\x00.\x00t\x00x\x00t\
+"
+
+qt_resource_struct = b"\
+\x00\x00\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x01\
+\x00\x00\x00\x00\x00\x00\x00\x00\
+\x00\x00\x00\x00\x00\x02\x00\x00\x00\x01\x00\x00\x00\x02\
+\x00\x00\x00\x00\x00\x00\x00\x00\
+\x00\x00\x00\x18\x00\x00\x00\x00\x00\x01\x00\x00\x00\x00\
+\x00\x00\x01\x8a\x06fC\xaf\
+"
+
+def qInitResources():
+    QtCore.qRegisterResourceData(0x03, qt_resource_struct, qt_resource_name, qt_resource_data)
+
+def qCleanupResources():
+    QtCore.qUnregisterResourceData(0x03, qt_resource_struct, qt_resource_name, qt_resource_data)
+
+qInitResources()
