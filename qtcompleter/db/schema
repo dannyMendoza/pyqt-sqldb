@@ -1,0 +1,5 @@
+SELECT c.name
+FROM pragma_table_info('clusters') c;
+SELECT name
+FROM sqlite_schema
+WHERE type ='table'

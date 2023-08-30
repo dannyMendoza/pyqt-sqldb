@@ -78,6 +78,8 @@ not
 NOT
 null
 NULL
+on
+ON
 or
 OR
 order
@@ -108,6 +110,8 @@ unique
 UNIQUE
 update
 UPDATE
+using
+USING
 values
 VALUES
 view
