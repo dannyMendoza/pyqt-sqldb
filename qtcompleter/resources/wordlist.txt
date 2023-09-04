@@ -110,6 +110,8 @@ unique
 UNIQUE
 update
 UPDATE
+use
+USE
 using
 USING
 values

@@ -5,5 +5,5 @@
 from qtcompleter.SQLTextEditor import ExecuteApp
 
 if __name__ == '__main__':
-    app = ExecuteApp()
+    app = ExecuteApp(file=r'qtcompleter/test.sql')
     app.run()

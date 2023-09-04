@@ -79,3 +79,8 @@ venv
 *.sql
 # Test DB
 History
+
+# Visual Studio
+.vs/
+editor.py
+syntax.py

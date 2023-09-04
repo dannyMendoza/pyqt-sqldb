@@ -1,6 +1,6 @@
 * {
-    font-family: 'Iosevka Term Curly', 'Open Sans Semibold';
-    font-size: 18px;
+    font-family: 'Iosevka Term', 'Open Sans Semibold';
+    font-size: 16px;
     font-weight: Normal;
     background: #c8c8c8;
     color: #000000;
@@ -20,12 +20,13 @@ QTextEdit {
 
 QTableView {
     /*
-    alternate-background-color: qlineargradient(x1: 0, y1: 0, x2: 0.5, y2: 1,
-                                stop: 0 #cbccc2, stop: 0.2 #f9faf2, stop: 0.6 #ffffff);
+    selection-background-color: qlineargradient(x1: 0, y1: 0, x2: 0.5, y2: 1,
+                                stop: 0 #1b7b87, stop: 0.4 #373d4d, stop: 1 black);
     */
-    selection-background-color: #6e7b8f;
-    alternate-background-color: #e3e3e3;
-    background-color: #f0f0f0;
+    selection-background-color: #0066ff;
+    font-size: 16px;
+    alternate-background-color: #c8c8c8;
+    background: #f0f0f0;
 }
 
 QTableView::indicator:unchecked {
@@ -39,15 +40,16 @@ QHeaderView::section {
                                       stop: 0.6 #2d2f38, stop:1 #2a2d36);
     background-color: #262936;
     */
-    background-color: #c8c8c8;
-    color: #000000;
+    background-color: #343538;
+    color: white;
+    padding-left: 4px;
     border: 1px solid #6c6c6c;
 }
 
 QHeaderView::section:checked
 {
-    background-color: #004069;
-    color: #ffffff;
+    background-color: #d9b806;
+    color: #000000;
 }
 
 QHeaderView::section:selected
@@ -62,6 +64,5 @@ QTableCornerButton::section {
                                       stop: 0.6 #434343, stop:1 #656565);
     background-color: #262936;
     */
-    background-color: #c8c8c8;
-    border: 1px solid #6c6c6c;
+    background-color: #343538;
 }

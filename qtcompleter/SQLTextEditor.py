@@ -3,16 +3,22 @@
 # Daniel Mendoza
 
 # References
-# QCompleter
+# [QCompleter]
 # https://doc.qt.io/qtforpython-6/overviews/qtwidgets-tools-customcompleter-example.html
+# [QSyntaxHighlighter]
+# https://doc.qt.io/qtforpython-6/examples/example_widgets_richtext_syntaxhighlighter.html
 
 from PySide6.QtCore import (
+        QEvent,
         QFile,
         QStringListModel,
         Qt,
         QTextStream,
+        QRegularExpression,
+        QRegularExpressionMatch,
         QSortFilterProxyModel,
-        Signal)
+        Signal,
+        Slot)
 from PySide6.QtGui import (
         QAction,
         QColor,
@@ -41,6 +47,9 @@ from PySide6.QtWidgets import (
 
 from os import fspath
 from pathlib import Path
+
+import csv
+import io
 import re
 
 if __name__ == '__main__':
@@ -56,14 +65,15 @@ class TextEdit(QTextEdit):
     def __init__(self, parent=None, table: list=[]):
         super(TextEdit, self).__init__(parent)
 
+        self.org = False
         self._completer = None
-        self.isShortcut = None
+        isShortcut = None
 
         # SQL Syntax Highlighter
         self._highlighter = Highlighter()
 
         # Make tab -> 4 spaces
-        self.setTabStopDistance(QFontMetricsF(self.font()).horizontalAdvance(' ') * 4)
+        self.setTabStopDistance(QFontMetricsF(self.font()).horizontalAdvance('  ')*5.4)
 
         self.table_completer = QCompleter(self)
         self.completerModel = QStringListModel()
@@ -82,9 +92,10 @@ class TextEdit(QTextEdit):
         """
 
         # Font (Foreground) Colors
-        comment_color = QColor("#9a9a9a")
+        digit_color = QColor("#FF0000")
+        comment_color = QColor("#4d491d")
         sql_color = QColor("#0e1791")
-        table_color = QColor("#aa025d")
+        table_color = QColor("#99005e")
 
         sql_format = QTextCharFormat()
         sql_format.setForeground(sql_color)
@@ -100,12 +111,22 @@ class TextEdit(QTextEdit):
             pattern = fr'(\b{word}\b)'
             self._highlighter.add_mapping(pattern, table_format)
 
+        digit_format = QTextCharFormat()
+        digit_format.setForeground(digit_color)
+        pattern = r"\b[^'\\]([0-9]+\.[0-9]+|[0-9]+)\b[^'\\]"
+        self._highlighter.add_mapping(pattern, digit_format)
+
         comment_format = QTextCharFormat()
         comment_format.setForeground(comment_color)
-        #comment_format.setBackground(QColor("#0ffff0"))
-        pattern = r'^\s*--.*$'
+        pattern = r'--.*$'
         self._highlighter.add_mapping(pattern, comment_format)
 
+#        pattern = r'/\*(.*)\*/'
+#        self._highlighter.add_mapping(pattern, comment_format)
+
+        #pattern = r'/\*.*\*/'
+        #pattern = r'^(.+)(?:\n|\r\n?)((?:(?:\n|\r\n?).+)+)'
+        #print(self._highlighter.get_mapping())
         # Column is commented out as it does not work correctly when pasting text
         # column_format = QTextCharFormat()
         # column_format.setForeground(QColor("#d8baf7"))
@@ -134,7 +155,6 @@ class TextEdit(QTextEdit):
         return
 
     def setCompleter(self, c):
-
         if self._completer is not None:
             self._completer.activated.disconnect()
 
@@ -177,8 +197,8 @@ class TextEdit(QTextEdit):
         super(TextEdit, self).focusInEvent(e)
 
     def tableCompleter(self):
+        self.org = self._completer
         self.setCompleter(self.table_completer)
-        self._completer.setCaseSensitivity(Qt.CaseSensitive)
         self._completer.popup().setCurrentIndex(
                 self._completer.completionModel().index(0, 0))
         cr = self.cursorRect()
@@ -192,11 +212,13 @@ class TextEdit(QTextEdit):
                 e.ignore()
                 # Let the completer do default behavior.
                 return
-            # print(e.key())
-            # print(Qt.Key_Tab)
+        #if e.key() == Qt.Key_Tab:
+        #    tc = self.textCursor()
+        #    tc.insertText("    ")
+        #    return
 
-        self.isShortcut = ((e.modifiers() & Qt.ControlModifier) != 0 and e.key() == Qt.Key_P)
-        if self._completer is None or not self.isShortcut:
+        isShortcut = (e.modifiers() & Qt.ControlModifier) and e.key() == Qt.Key_M
+        if self._completer is None or not isShortcut:
             # Do not process the shortcut when we have a completer.
             super(TextEdit, self).keyPressEvent(e)
 
@@ -221,13 +243,19 @@ class TextEdit(QTextEdit):
         else:
             self._completer.setCaseSensitivity(Qt.CaseInsensitive)
 
-        if not self.isShortcut and (hasModifier or len(e.text()) == 0 or len(completionPrefix) < 1 or e.text()[-1] in eow):
+        if not isShortcut and (hasModifier or len(e.text()) == 0 or len(completionPrefix) < 1 or e.text()[-1] in eow):
             self._completer.popup().hide()
             return
 
-        if self.isShortcut:
-            print('HELLO')
+        if isShortcut:
             self.tableCompleter()
+            return
+        else:
+            if self.org and not self._completer.popup().isVisible():
+                # Set default completer
+                self.setCompleter(self.org)
+                self.org = False
+                return
 
         if completionPrefix != self._completer.completionPrefix():
             self._completer.setCompletionPrefix(completionPrefix)
@@ -254,6 +282,8 @@ class MainWindow(QMainWindow, Query):
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
 
+        self.table_widget = QWidget()
+
         self.createMenu()
 
         sqlcursor = self.con.cursor()
@@ -269,19 +299,20 @@ class MainWindow(QMainWindow, Query):
         self.all_tables = []
         sqlcursor.close()
 
-        # SQL Syntax Highlighter
+        # SQL Current DB Table Syntax Highlighter
         self.table_list.sort()
 
         # Init TextEdit passing the List of Tables (Variable: table)
         # If Ctrl-P (Shortcut) then it will popup autocompletion
         # for the current DB tables
         self.completingTextEdit = TextEdit(table=self.table_list)
+        self.completingTextEdit.installEventFilter(self)
 
         self.completer = QCompleter(self)
         self.completerModel = self.modelFromFile(':/resources/wordlist.txt')
         self.completer_list = self.completerModel.stringList()
 
-        # SQL KeyWords + Table Syntax Highlighter
+        # SQL KeyWord Syntax Highlighter
         self.list_copy = self.completer_list.copy()
         self.list_copy.sort()
 
@@ -295,7 +326,7 @@ class MainWindow(QMainWindow, Query):
         self.completingTextEdit.setup_editor(kw=self.list_copy, table=self.table_list)
 
         self.completingTextEdit.setCompleter(self.completer)
-        self.completingTextEdit.textChanged.connect(self.tableChecker)
+        self.completingTextEdit.textChanged.connect(self.addColumnData)
 
         # Buttons
         self.btn_query = QPushButton('Execute')
@@ -320,8 +351,7 @@ class MainWindow(QMainWindow, Query):
         self.setCentralWidget(widget)
         self.completingTextEdit.setFocus()
         self.resize(500, 300)
-        self.setWindowTitle("SQL DB DMEditor")
-
+        self.setWindowTitle("DCS-DB Editor")
 
     def closeEvent(self, event):
         self.closed.emit()
@@ -329,10 +359,76 @@ class MainWindow(QMainWindow, Query):
         super().closeEvent(event)
         self.close()
 
-    def tableChecker(self):
-        #if self.completingTextEdit.isShortcut:
-        #    print('SQL Table Completer')
-        #    self.completingTextEdit.setCompleter(self.completer)
+    @Slot()
+    def eventFilter(self, source, event):
+        if event.type() == QEvent.KeyPress:
+            if event.matches(QKeySequence.Copy) and type(source) == QTableView:
+                # Source -> Current TableView
+                self.copySelection(source)
+                return True
+            elif event.matches(QKeySequence.Paste) and type(source) == TextEdit:
+                self.textPasted()
+        return super().eventFilter(source, event)
+
+    def textPasted(self):
+        text = self.completingTextEdit.toPlainText()
+        tables = {table for table in self.table_list if table in text}
+        if tables:
+            for table in tables:
+                if table not in self.all_tables:
+                    self.all_tables.append(table)
+                    sqlcursor = self.con.cursor()
+                    print(f'{self.all_tables[-1]}')
+                    query = (
+                            'SELECT name '
+                            f'FROM pragma_table_info("{table}") '
+                            'ORDER BY name;'
+                            )
+                    out = sqlcursor.execute(query)
+                    table_cols = [column[0] for column in out]
+                    print(f'{table_cols}\n')
+
+                    # SQL Syntax Highlighter (Columns)
+                    # self.completingTextEdit.setup_editor(column=table_cols)
+
+                    dups = set(self.completer_list)
+                    dups.update(table_cols)
+                    self.completer_list = list(dups)
+                    self.completer_list.sort(key=len)
+
+                    self.completerModel.setStringList(self.completer_list)
+                    self.completingTextEdit.setCompleter(self.completer)
+                    sqlcursor.close()
+        return
+
+
+    def copySelection(self, source):
+        selection = source.selectedIndexes()
+        if selection:
+            rows = sorted(index.row() for index in selection)
+            columns = sorted(index.column() for index in selection)
+            # hcolumns -> no dups for multiple rows under same column
+            hcolumns = list(set(columns))
+            row_count = rows[-1] - rows[0] + 1
+            col_count = columns[-1] - columns[0] + 1
+            hor_headers = source.model().headers
+            # get selected headers
+            sel_headers = [hor_headers[h] for h in hcolumns]
+            table = [[''] * col_count for _ in range(row_count)]
+            for index in selection:
+                row = index.row() - rows[0]
+                column = index.column() - columns[0]
+                table[row][column] = index.data()
+            stream = io.StringIO()
+            if len(table) > 1 or len(table[0]) > 1:
+                table.insert(0, sel_headers)
+                csv.writer(stream, delimiter='\t').writerows(table)
+                QApplication.clipboard().setText(stream.getvalue())
+                return
+            QApplication.clipboard().setText(str(table[0][0]))
+            return
+
+    def addColumnData(self):
         cursor = self.completingTextEdit.textCursor()
         cursor.select(QTextCursor.WordUnderCursor)
         selected_text = cursor.selectedText().strip()
@@ -350,7 +446,7 @@ class MainWindow(QMainWindow, Query):
             print(f'{table_cols}\n')
 
             # SQL Syntax Highlighter (Columns)
-            self.completingTextEdit.setup_editor(column=table_cols)
+            # self.completingTextEdit.setup_editor(column=table_cols)
 
             dups = set(self.completer_list)
             dups.update(table_cols)
@@ -371,6 +467,8 @@ class MainWindow(QMainWindow, Query):
         if isinstance(data, list):
             for record, cursor in data:
                 table = QTableView()
+                table.setAlternatingRowColors(True)
+                table.installEventFilter(self)
                 self.vlayout.addWidget(table)
                 d = record, cursor
                 model = CustomTableView(d)
@@ -411,6 +509,12 @@ class MainWindow(QMainWindow, Query):
         self.completingTextEdit.setFocus()
 
     def openFile(self, path=""):
+        for i in range(self.vlayout.count()):
+            if i == 0:
+                continue
+            child = self.vlayout.itemAt(i).widget()
+            # print(child)
+            child.deleteLater()
         file_name = path
         if not file_name:
             file_name, _ = QFileDialog.getOpenFileName(
@@ -421,6 +525,35 @@ class MainWindow(QMainWindow, Query):
             if in_file.open(QFile.ReadOnly | QFile.Text):
                 stream = QTextStream(in_file)
                 self.completingTextEdit.setPlainText(stream.readAll())
+
+        text = self.completingTextEdit.toPlainText()
+        tables = {table for table in self.table_list if table in text}
+        if tables:
+            for table in tables:
+                if table not in self.all_tables:
+                    self.all_tables.append(table)
+                    sqlcursor = self.con.cursor()
+                    print(f'{self.all_tables[-1]}')
+                    query = (
+                            'SELECT name '
+                            f'FROM pragma_table_info("{table}") '
+                            'ORDER BY name;'
+                            )
+                    out = sqlcursor.execute(query)
+                    table_cols = [column[0] for column in out]
+                    print(f'{table_cols}\n')
+
+                    # SQL Syntax Highlighter (Columns)
+                    # self.completingTextEdit.setup_editor(column=table_cols)
+
+                    dups = set(self.completer_list)
+                    dups.update(table_cols)
+                    self.completer_list = list(dups)
+                    self.completer_list.sort(key=len)
+
+                    self.completerModel.setStringList(self.completer_list)
+                    self.completingTextEdit.setCompleter(self.completer)
+                    sqlcursor.close()
 
     def createMenu(self):
         file_menu = self.menuBar().addMenu(self.tr("&File"))
@@ -481,33 +614,89 @@ class MainWindow(QMainWindow, Query):
 class Highlighter(QSyntaxHighlighter):
     def __init__(self, parent=None):
         QSyntaxHighlighter.__init__(self, parent)
-
         self._mappings = {}
+
+        quotes_color = QColor("#FF0000")
+        quotes_format  = QTextCharFormat()
+        quotes_format.setForeground(quotes_color)
+        self.single = (QRegularExpression("\'"),None,1,quotes_format)
+        #self.double = (QRegularExpression("\""),None,2,quotes_format)
+
+        #startExpression = QRegularExpression("(/\\*|'|\")")
+        multiLine_color = QColor("#4d491d")
+        multiLineCommentFormat = QTextCharFormat()
+        multiLineCommentFormat.setForeground(multiLine_color)
+        startExpression = QRegularExpression("/\\*")
+        endExpression = QRegularExpression(f"\\*/")
+        self.comment = (startExpression, endExpression,3,multiLineCommentFormat)
 
     def add_mapping(self, pattern, format):
         self._mappings[pattern] = format
 
     def highlightBlock(self, text):
+        pt = True
         for pattern, format in self._mappings.items():
-            for match in re.finditer(pattern, text):
+            for match in re.finditer(pattern, text, re.MULTILINE):
+                if '--' in match.string:
+                    pt = False
                 start, end = match.span()
                 self.setFormat(start, end - start, format)
+
+        self.setCurrentBlockState(0)
+
+        if pt:
+            quotes_multiline =  self.match_multiline(text, *self.single)
+
+        comment_multiline = self.match_multiline(text, *self.comment)
+
+    def match_multiline(self, text, delimiter, endDelimiter, in_state, style):
+        if not endDelimiter:
+            endDelimiter = delimiter
+
+        if self.previousBlockState() == in_state:
+            start = 0
+            add = 0
+        else:
+            match = delimiter.match(text)
+            start = match.capturedStart()
+            add = match.capturedLength()
+
+        while start >= 0:
+            match = endDelimiter.match(text, start + add)
+            end =  match.capturedStart()
+            if end >= add:
+                length = end - start + match.capturedLength()
+                self.setCurrentBlockState(0)
+            else:
+                self.setCurrentBlockState(in_state)
+                length = len(text) - start + add # - match.capturedLength()
+
+            self.setFormat(start, length, style)
+            match = delimiter.match(text, start + length)
+            start = match.capturedStart()
+
+        # Return True if still inside a multi-line string, False otherwise
+        if self.currentBlockState() == in_state:
+            return True
+        else:
+            return False
 
 
 class ExecuteApp():
     def __init__(self, file: str=None):
-        self._test_file = file
+        self.file = file
+        pass
 
     def run(self):
         import sys
 
         app = QApplication(sys.argv)
         window = MainWindow()
+        window.resize(1200,600)
         window.show()
-        if self._test_file:
-            print(fspath(Path(file).resolve()))
-            window.openFile(fspath(Path(file).resolve()))
-            # window.openFile(fspath(Path(__file__).resolve()))
+        if self.file:
+            print(fspath(Path(self.file).resolve()))
+            window.openFile(fspath(Path(self.file).resolve()))
 
         with open('style.qss', 'r') as qss:
             _style = qss.read()
@@ -516,6 +705,6 @@ class ExecuteApp():
         sys.exit(app.exec())
 
 if __name__ == '__main__':
-    file = 'qtcompleter/test.sql'
+    file = 'test.sql'
     app = ExecuteApp(file)
     app.run()

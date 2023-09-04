@@ -38,22 +38,65 @@ class Query(DBConnection):
         query = query.translate(str.maketrans({'\n':'~','\t':' '}))
         query = [q.strip() for q in re.split(r'~|;', query) if q.strip() != '']
         # query = list(filter(None, re.split(r'-|;', query.strip())))
-        # print(query)
         query_list = []
+        multiline = False
         o = False
         if query:
-            o = query[0]
-            if o.strip().startswith('--'):
-                print(f'Comment: {o.strip()}')
-                o = ''
+            o = query[0].strip()
+            if '--' in o:
+                # Single Line Comment
+                index = re.search(r'--',o).end()
+                o = query[0][:index-2]
+            elif '/*' in o:
+                # Multi Line Comment
+                index = re.search(r'/\*',o).start()
+                # print(f'First o {o=}')
+                if '*/' in o:
+                    x = query[0][:index]
+                    index = re.search(r'\*/',o).end()
+                    x += query[0][index:]
+                    # print(f'Second o {o=}')
+                    multiline = False
+                    o = x
+                else:
+                    o = query[0][:index-2]
+                    multiline = True
             for q in query[1:]:
-                if q.strip().startswith('select'):
-                    o += f';{q}'
-                    continue
-                if q.strip().startswith('--'):
-                    print(f'Comment: {q.strip()}')
-                    continue
-                o += f' {q}'
+                if multiline:
+                    index = re.search(r'\*/',q)
+                    if index:
+                        index = index.end()
+                        #print(f'{q[index:]=}')
+                        o += q[index:]
+                        multiline = False
+                    else:
+                        continue
+                elif '--' in q:
+                    # Single Line Comment
+                    index = re.search(r'--',q).end()
+                    q = q[:index-2].lower().strip()
+                    if q.startswith('select'):
+                        o += f';{q}'
+                    else:
+                        o += q[:index-2].strip()
+                    print(f'SINGLE {o=}')
+                elif '/*' in q:
+                    # Multi Line Comment
+                    index = re.search(r'/\*',q).start()
+                    if '*/' in q:
+                        x = q[:index]
+                        index = re.search(r'\*/',q).end()
+                        x += q[index:]
+                        multiline = False
+                        o += x
+                    else:
+                        o = q[:index-2]
+                        multiline = True
+                else:
+                    if q.lower().strip().startswith('select'):
+                        o += f';{q}'
+                        continue
+                    o += f' {q}'
             query = [q for q in o.split(';') if q != '']
             # print(query)
             if query:
