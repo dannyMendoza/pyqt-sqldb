@@ -82,5 +82,10 @@ History
 
 # Visual Studio
 .vs/
+
+# Scritps from QT examples page
 editor.py
 syntax.py
+scroll.py
+layout.py
+dockwidgets/

@@ -15,8 +15,7 @@ from PySide6.QtCore import (
         Qt,
         QTextStream,
         QRegularExpression,
-        QRegularExpressionMatch,
-        QSortFilterProxyModel,
+        QSize,
         Signal,
         Slot)
 from PySide6.QtGui import (
@@ -25,7 +24,6 @@ from PySide6.QtGui import (
         QCursor,
         QFont,
         QFontMetricsF,
-        QFontDatabase,
         QKeySequence,
         QTextCursor,
         QTextCharFormat,
@@ -43,7 +41,10 @@ from PySide6.QtWidgets import (
         QTableView,
         QTextEdit,
         QVBoxLayout,
-        QWidget)
+        QScrollArea,
+        QSplitter,
+        QWidget
+        )
 
 from os import fspath
 from pathlib import Path
@@ -282,8 +283,6 @@ class MainWindow(QMainWindow, Query):
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
 
-        self.table_widget = QWidget()
-
         self.createMenu()
 
         sqlcursor = self.con.cursor()
@@ -331,6 +330,7 @@ class MainWindow(QMainWindow, Query):
         # Buttons
         self.btn_query = QPushButton('Execute')
         self.btn_close = QPushButton('Close')
+        self.btn_hide = QPushButton('Hide Table Data')
 
         # Button Shortcuts
         self.btn_query.setShortcut(QKeySequence(QKeySequence(Qt.CTRL|Qt.Key_R)))
@@ -338,17 +338,32 @@ class MainWindow(QMainWindow, Query):
         # Buttons Functionality
         self.btn_close.clicked.connect(self.close)
         self.btn_query.clicked.connect(self.executeQuery)
+        self.btn_hide.clicked.connect(self.toggle_table_visibility)
 
-        # Grid, Vertical & Horizontal layout(s)
-        self.vlayout = QVBoxLayout()
+
+        # Scroll Area
+        scroll_area = QWidget()
+        # Vertical layout
+        self.vlayout = QVBoxLayout(scroll_area)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setVisible(False)
+        self.scroll.setWidget(scroll_area)
+
+        # Grid layout
         self.glayout = QGridLayout()
         self.glayout.addWidget(self.btn_query, 0, 0, 1, 2)
         self.glayout.addWidget(self.btn_close, 0, 2, 1, 1)
-        self.vlayout.addWidget(self.completingTextEdit)
-        self.glayout.addLayout(self.vlayout, 2, 0, 1, 3)
+        self.glayout.addWidget(self.completingTextEdit, 1, 0, 1, 3)
+        self.glayout.addWidget(self.scroll, 2, 0, 1, 3)
+        # self.glayout.setContentsMargins(0, 0, 0, 0)
+
         widget = QWidget()
         widget.setLayout(self.glayout)
         self.setCentralWidget(widget)
+
         self.completingTextEdit.setFocus()
         self.resize(500, 300)
         self.setWindowTitle("DCS-DB Editor")
@@ -457,18 +472,47 @@ class MainWindow(QMainWindow, Query):
             self.completingTextEdit.setCompleter(self.completer)
             sqlcursor.close()
 
+    def toggle_table_visibility(self):
+        f = False
+        for i in range(self.vlayout.count()):
+            if i == 0:
+                continue
+            child = self.vlayout.itemAt(i).widget()
+            if child.isVisible():
+                self.btn_hide.setText('Show Table Data')
+                child.setVisible(False)
+                f = True
+            else:
+                self.btn_hide.setText('Hide Table Data')
+                child.setVisible(True)
+        if f:
+            self.glayout.setRowStretch(0,1)
+            self.glayout.setRowStretch(1,30)
+            self.glayout.setRowStretch(2,1)
+            return
+        self.glayout.setRowStretch(0,1)
+        self.glayout.setRowStretch(1,50)
+        self.glayout.setRowStretch(2,50)
+
     def fillTable(self, data: list=[]):
         for i in range(self.vlayout.count()):
             if i == 0:
                 continue
             child = self.vlayout.itemAt(i).widget()
-            #print(child)
+            # print(child)
             child.deleteLater()
         if isinstance(data, list):
+            self.scroll.setVisible(True)
+            self.btn_hide.setText('Hide Table Data')
+            self.vlayout.addWidget(self.btn_hide)
+            self.glayout.setRowStretch(0,1)
+            self.glayout.setRowStretch(1,30)
+            self.glayout.setRowStretch(2,60)
             for record, cursor in data:
                 table = QTableView()
                 table.setAlternatingRowColors(True)
                 table.installEventFilter(self)
+                table.setMinimumSize(QSize(100,300))
                 self.vlayout.addWidget(table)
                 d = record, cursor
                 model = CustomTableView(d)
@@ -493,25 +537,26 @@ class MainWindow(QMainWindow, Query):
         else:
             # Return if TextEdit is empty
             return
-        if isinstance(data, list):
+        if data and isinstance(data, list):
             self.fillTable(data=data)
             return
+        print(f'Empty: {data=}')
         return
 
     def newFile(self):
         for i in range(self.vlayout.count()):
-            if i == 0:
-                continue
             child = self.vlayout.itemAt(i).widget()
             # print(child)
             child.deleteLater()
+        self.scroll.setVisible(False)
+        self.glayout.setRowStretch(0,1)
+        self.glayout.setRowStretch(1,50)
+        self.glayout.setRowStretch(2,0)
         self.completingTextEdit.clear()
         self.completingTextEdit.setFocus()
 
     def openFile(self, path=""):
         for i in range(self.vlayout.count()):
-            if i == 0:
-                continue
             child = self.vlayout.itemAt(i).widget()
             # print(child)
             child.deleteLater()
@@ -526,6 +571,10 @@ class MainWindow(QMainWindow, Query):
                 stream = QTextStream(in_file)
                 self.completingTextEdit.setPlainText(stream.readAll())
 
+        self.scroll.setVisible(False)
+        self.glayout.setRowStretch(0,1)
+        self.glayout.setRowStretch(1,50)
+        self.glayout.setRowStretch(2,0)
         text = self.completingTextEdit.toPlainText()
         tables = {table for table in self.table_list if table in text}
         if tables:

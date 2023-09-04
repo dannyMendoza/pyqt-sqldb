@@ -59,7 +59,7 @@ class Query(DBConnection):
                     multiline = False
                     o = x
                 else:
-                    o = query[0][:index-2]
+                    o = query[0][:index]
                     multiline = True
             for q in query[1:]:
                 if multiline:
@@ -79,7 +79,7 @@ class Query(DBConnection):
                         o += f';{q}'
                     else:
                         o += q[:index-2].strip()
-                    print(f'SINGLE {o=}')
+                    #print(f'SINGLE {o=}')
                 elif '/*' in q:
                     # Multi Line Comment
                     index = re.search(r'/\*',q).start()
@@ -90,7 +90,7 @@ class Query(DBConnection):
                         multiline = False
                         o += x
                     else:
-                        o = q[:index-2]
+                        o += q[:index-2]
                         multiline = True
                 else:
                     if q.lower().strip().startswith('select'):
