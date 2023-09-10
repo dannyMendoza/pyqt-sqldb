@@ -2,8 +2,8 @@
 
 # Daniel Mendoza
 
-from qtcompleter.SQLTextEditor import ExecuteApp
+from editor.sqlcode_editor import ExecuteApp
 
 if __name__ == '__main__':
-    app = ExecuteApp(file=r'qtcompleter/test.sql')
+    app = ExecuteApp(file=r'test.sql')
     app.run()

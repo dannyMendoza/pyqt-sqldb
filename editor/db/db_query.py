@@ -8,7 +8,7 @@ import re
 import sys
 import sqlite3
 
-from .DBConnection import DBConnection
+from .db_connection import DBConnection
 
 script_path = pathlib.Path(__file__).parent.absolute()
 
@@ -90,7 +90,7 @@ class Query(DBConnection):
                         multiline = False
                         o += x
                     else:
-                        o += q[:index-2]
+                        o += q[:index]
                         multiline = True
                 else:
                     if q.lower().strip().startswith('select'):

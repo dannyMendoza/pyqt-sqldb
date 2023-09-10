@@ -3,19 +3,25 @@
 # Daniel Mendoza
 
 # References
+
 # [QCompleter]
 # https://doc.qt.io/qtforpython-6/overviews/qtwidgets-tools-customcompleter-example.html
 # [QSyntaxHighlighter]
 # https://doc.qt.io/qtforpython-6/examples/example_widgets_richtext_syntaxhighlighter.html
+# [QTextEdit->CodeEditor->ShowLineNumber]
+# https://doc.qt.io/qtforpython-6.2/examples/example_widgets__codeeditor.html
+# https://stackoverflow.com/questions/2443358/how-to-add-lines-numbers-to-qtextedit
 
 from PySide6.QtCore import (
         QEvent,
         QFile,
-        QStringListModel,
         Qt,
         QTextStream,
+        QRect,
+        QRectF,
         QRegularExpression,
         QSize,
+        QStringListModel,
         Signal,
         Slot)
 from PySide6.QtGui import (
@@ -24,9 +30,14 @@ from PySide6.QtGui import (
         QCursor,
         QFont,
         QFontMetricsF,
+        QIcon,
         QKeySequence,
+        QPainter,
+        QPaintEvent,
+        QResizeEvent,
         QTextCursor,
         QTextCharFormat,
+        QTextFormat,
         QSyntaxHighlighter
         )
 from PySide6.QtWidgets import (
@@ -37,6 +48,7 @@ from PySide6.QtWidgets import (
         QHeaderView,
         QMainWindow,
         QMessageBox,
+        QPlainTextEdit,
         QPushButton,
         QTableView,
         QTextEdit,
@@ -54,13 +66,19 @@ import io
 import re
 
 if __name__ == '__main__':
-    from db.DBQuery import Query
     import customcompleter_rc
-    from TableView import CustomTableView
+    import rc_icons
+    from db.db_query import Query
+    from highlighter import Highlighter
+    from linenumber import LineNumberArea
+    from table_view import CustomTableView
 else:
-    from . db.DBQuery import Query
-    from . import customcompleter_rc
-    from .TableView import CustomTableView
+    from .import customcompleter_rc
+    from .import rc_icons
+    from .db.db_query import Query
+    from .highlighter import Highlighter
+    from .linenumber import LineNumberArea
+    from .table_view import CustomTableView
 
 class TextEdit(QTextEdit):
     def __init__(self, parent=None, table: list=[]):
@@ -80,6 +98,189 @@ class TextEdit(QTextEdit):
         self.completerModel = QStringListModel()
         self.completerModel.setStringList(table)
         self.table_completer.setModel(self.completerModel)
+
+        # Show Line Numbers
+        self.lineNumberArea = LineNumberArea(self)
+        self.document().blockCountChanged.connect(self.updateLineNumberAreaWidth)
+        self.verticalScrollBar().valueChanged.connect(self.updateLineNumberArea)
+        self.textChanged.connect(self.updateLineNumberArea)
+        self.cursorPositionChanged.connect(self.updateLineNumberArea)
+        self.highlight_current_line()
+
+        # Highlight Current Line
+        self.cursorPositionChanged.connect(self.highlight_current_line)
+        self.updateLineNumberAreaWidth(0)
+
+    def lineNumberAreaWidth(self):
+        digits = 1
+        m = max(1, self.document().blockCount())
+        while m >= 10:
+            m /= 10
+            digits += 1
+        space = 10 + self.fontMetrics().horizontalAdvance('9') * digits
+        return space
+
+    def updateLineNumberAreaWidth(self, newBlockCount: int):
+        self.setViewportMargins(self.lineNumberAreaWidth(), 0, 0, 0)
+
+    def updateLineNumberAreaRect(self, rect_f: QRectF):
+        self.updateLineNumberArea()
+
+    def updateLineNumberAreaInt(self, slider_pos: int):
+        self.updateLineNumberArea()
+
+    def updateLineNumberArea(self):
+        """
+        When the signal is emitted, the sliderPosition has been adjusted
+        according to the action, but the value has not yet been propagated
+        (meaning the valueChanged() signal was not yet emitted), and the visual
+        display has not been updated. In slots connected to self signal you can
+        thus safely adjust any action by calling setSliderPosition() yourself,
+        based on both the action and the slider's value.
+        """
+
+        # Make sure the sliderPosition triggers one last time the valueChanged() signal with the actual value !!!!
+        self.verticalScrollBar().setSliderPosition(self.verticalScrollBar().sliderPosition())
+
+        # Since "QTextEdit" does not have an "updateRequest(...)" signal, we chose
+        # to grab the imformation from "sliderPosition()" and "contentsRect()".
+        # See the necessary connections used (Class constructor implementation part).
+
+        rect = self.contentsRect()
+
+        self.lineNumberArea.update(0, rect.y(), self.lineNumberArea.width(), rect.height())
+        self.updateLineNumberAreaWidth(0)
+
+        dy = self.verticalScrollBar().sliderPosition()
+        if dy > -1:
+            self.lineNumberArea.scroll(0, dy)
+
+        # Adjust slider to always see the number of the currently being edited line...
+        first_block_id = self.getFirstVisibleBlockId()
+        if first_block_id == 0 or self.textCursor().block().blockNumber() == first_block_id-1:
+            self.verticalScrollBar().setSliderPosition(dy-self.document().documentMargin())
+
+    def resizeEvent(self, event: QResizeEvent):
+        QTextEdit.resizeEvent(self, event)
+
+        cr = self.contentsRect()
+        self.lineNumberArea.setGeometry(QRect(cr.left(), cr.top(), self.lineNumberAreaWidth(), cr.height()))
+
+    def getFirstVisibleBlockId(self) -> int:
+        # Detect the first block for which bounding rect - once translated
+        # in absolute coordinated - is contained by the editor's text area
+
+        # Costly way of doing but since "blockBoundingGeometry(...)" doesn't
+        # exists for "QTextEdit"...
+
+        curs = QTextCursor(self.document())
+        curs.movePosition(QTextCursor.Start)
+        for i in range(self.document().blockCount()):
+            block = curs.block()
+
+            r1 = self.viewport().geometry()
+            r2 = self.document().documentLayout().blockBoundingRect(block).translated(
+                    self.viewport().geometry().x(), self.viewport().geometry().y() - (
+                        self.verticalScrollBar().sliderPosition()
+                        )).toRect()
+
+            if r1.contains(r2, True):
+                return i
+
+            curs.movePosition(QTextCursor.NextBlock)
+        return 0
+
+    def lineNumberAreaPaintEvent(self, event: QPaintEvent):
+        self.verticalScrollBar().setSliderPosition(self.verticalScrollBar().sliderPosition())
+
+        painter = QPainter(self.lineNumberArea)
+        font = painter.font()
+        painter.fillRect(event.rect(), QColor(200, 200, 200))
+        blockNumber = self.getFirstVisibleBlockId()
+
+        block = self.document().findBlockByNumber(blockNumber)
+
+        if blockNumber > 0:
+            prev_block = self.document().findBlockByNumber(blockNumber - 1)
+        else:
+            prev_block = block
+
+        if blockNumber > 0:
+            translate_y = -self.verticalScrollBar().sliderPosition()
+        else:
+            translate_y = 0
+
+        top = self.viewport().geometry().top()
+
+        # Adjust text position according to the previous "non entirely visible" block
+        # if applicable. Also takes in consideration the document's margin offset.
+
+        if blockNumber == 0:
+            # Simply adjust to document's margin
+            additional_margin = self.document().documentMargin() -1 - self.verticalScrollBar().sliderPosition()
+        else:
+            # Getting the height of the visible part of the previous "non entirely visible" block
+            additional_margin = self.document().documentLayout().blockBoundingRect(prev_block) \
+                    .translated(0, translate_y).intersected(self.viewport().geometry()).height()
+
+        # Shift the starting point
+        top += additional_margin
+
+        bottom = top + int(self.document().documentLayout().blockBoundingRect(block).height())
+
+        col_1 = QColor(0, 0, 0)      # Current line (Black)
+        col_0 = QColor(120, 120, 120)    # Other lines  (custom darkgrey)
+
+        # Draw the numbers (displaying the current line number in Black)
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = f"{blockNumber + 1}"
+                painter.setPen(QColor(120, 120, 120))
+
+                font.setBold(False)
+
+                if self.textCursor().blockNumber() == blockNumber:
+                    painter.setPen(col_1)
+                    font.setBold(True)
+                else:
+                    painter.setPen(col_0)
+
+                painter.setFont(font)
+
+                painter.drawText(-5, top,
+                                 self.lineNumberArea.width(), self.fontMetrics().height(),
+                                 Qt.AlignRight, number)
+
+            block = block.next()
+            top = bottom
+            bottom = top + int(self.document().documentLayout().blockBoundingRect(block).height())
+            blockNumber += 1
+
+    @Slot()
+    def highlight_current_line(self):
+        """
+        A format that is used to specify a foreground or background brush/color
+        for the selection.
+
+        ExtraSelection provides a way of specifying a character format for a
+        given selection in a document
+        """
+        extra_selections = []
+
+        if not self.isReadOnly():
+            selection = self.ExtraSelection()
+
+            line_color = QColor(200, 200, 200).lighter(110)
+            selection.format.setBackground(line_color)
+
+            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+
+            extra_selections.append(selection)
+
+        self.setExtraSelections(extra_selections)
 
     def setup_editor(self, kw: list=[], table: list=[], column: list=[]):
         """
@@ -114,7 +315,8 @@ class TextEdit(QTextEdit):
 
         digit_format = QTextCharFormat()
         digit_format.setForeground(digit_color)
-        pattern = r"\b[^'\\]([0-9]+\.[0-9]+|[0-9]+)\b[^'\\]"
+        #pattern = r"\b[^'\\]([0-9]+|[0-9]+\.[0-9]+)\b[^'\\]"
+        pattern = r"^\b(?=.)([+-]?([0-9]*)(\.([0-9]+))?)\b"
         self._highlighter.add_mapping(pattern, digit_format)
 
         comment_format = QTextCharFormat()
@@ -203,7 +405,8 @@ class TextEdit(QTextEdit):
         self._completer.popup().setCurrentIndex(
                 self._completer.completionModel().index(0, 0))
         cr = self.cursorRect()
-        cr.setWidth(self._completer.popup().sizeHintForColumn(0) + self._completer.popup().verticalScrollBar().sizeHint().width())
+        cr.setWidth(self._completer.popup().sizeHintForColumn(0) +
+                    self._completer.popup().verticalScrollBar().sizeHint().width())
         self._completer.complete(cr)
 
     def keyPressEvent(self, e):
@@ -217,6 +420,7 @@ class TextEdit(QTextEdit):
         #    tc = self.textCursor()
         #    tc.insertText("    ")
         #    return
+
 
         isShortcut = (e.modifiers() & Qt.ControlModifier) and e.key() == Qt.Key_M
         if self._completer is None or not isShortcut:
@@ -283,6 +487,7 @@ class MainWindow(QMainWindow, Query):
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
 
+        self.create_actions()
         self.createMenu()
 
         sqlcursor = self.con.cursor()
@@ -295,6 +500,7 @@ class MainWindow(QMainWindow, Query):
                 )
         out = sqlcursor.execute(query)
         self.table_list = [table[0] for table in out]
+        self.table_list.extend([table.upper() for table in self.table_list])
         self.all_tables = []
         sqlcursor.close()
 
@@ -325,7 +531,11 @@ class MainWindow(QMainWindow, Query):
         self.completingTextEdit.setup_editor(kw=self.list_copy, table=self.table_list)
 
         self.completingTextEdit.setCompleter(self.completer)
+
+        # Signals
         self.completingTextEdit.textChanged.connect(self.addColumnData)
+        self.completingTextEdit.cursorPositionChanged.connect(self.textPasted)
+        self.last_position = None
 
         # Buttons
         self.btn_query = QPushButton('Execute')
@@ -340,9 +550,9 @@ class MainWindow(QMainWindow, Query):
         self.btn_query.clicked.connect(self.executeQuery)
         self.btn_hide.clicked.connect(self.toggle_table_visibility)
 
-
         # Scroll Area
         scroll_area = QWidget()
+
         # Vertical layout
         self.vlayout = QVBoxLayout(scroll_area)
         self.scroll = QScrollArea()
@@ -366,27 +576,48 @@ class MainWindow(QMainWindow, Query):
 
         self.completingTextEdit.setFocus()
         self.resize(500, 300)
-        self.setWindowTitle("DCS-DB Editor")
+        self.setWindowTitle("DMNIX* DB Editor")
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QEvent):
         self.closed.emit()
         self.close_connection()
         super().closeEvent(event)
-        self.close()
+        #self.close()
 
     @Slot()
-    def eventFilter(self, source, event):
-        if event.type() == QEvent.KeyPress:
+    def eventFilter(self, source, event) -> super:
+        if event and event.type() == QEvent.KeyPress:
             if event.matches(QKeySequence.Copy) and type(source) == QTableView:
                 # Source -> Current TableView
                 self.copySelection(source)
                 return True
             elif event.matches(QKeySequence.Paste) and type(source) == TextEdit:
-                self.textPasted()
+                self.get_cursor()
         return super().eventFilter(source, event)
 
-    def textPasted(self):
-        text = self.completingTextEdit.toPlainText()
+    def get_cursor(self) -> int:
+        cursor = self.completingTextEdit.textCursor()
+        self.last_position = cursor.position()
+        return self.last_position
+
+    def textPasted(self, whole: bool=False) -> None:
+        """Add table column data to QCompleter
+
+        Keyword arguments:
+        whole -- read all text (default False)
+        """
+        if whole:
+            text = self.completingTextEdit.toPlainText()
+        else:
+            if not self.last_position:
+                # Paste event not triggered
+                return
+            position = self.completingTextEdit.textCursor().position()
+            last_position = self.last_position
+            self.last_position = None
+            # print(f'{last_position=} {position=}')
+            text = self.completingTextEdit.toPlainText()[last_position:position]
+
         tables = {table for table in self.table_list if table in text}
         if tables:
             for table in tables:
@@ -402,6 +633,8 @@ class MainWindow(QMainWindow, Query):
                     out = sqlcursor.execute(query)
                     table_cols = [column[0] for column in out]
                     print(f'{table_cols}\n')
+                    table_cols.extend([column.upper() for column in table_cols])
+                    table_cols.sort()
 
                     # SQL Syntax Highlighter (Columns)
                     # self.completingTextEdit.setup_editor(column=table_cols)
@@ -416,8 +649,7 @@ class MainWindow(QMainWindow, Query):
                     sqlcursor.close()
         return
 
-
-    def copySelection(self, source):
+    def copySelection(self, source: QTableView)  -> str:
         selection = source.selectedIndexes()
         if selection:
             rows = sorted(index.row() for index in selection)
@@ -438,12 +670,10 @@ class MainWindow(QMainWindow, Query):
             if len(table) > 1 or len(table[0]) > 1:
                 table.insert(0, sel_headers)
                 csv.writer(stream, delimiter='\t').writerows(table)
-                QApplication.clipboard().setText(stream.getvalue())
-                return
-            QApplication.clipboard().setText(str(table[0][0]))
-            return
+                return QApplication.clipboard().setText(stream.getvalue())
+            return QApplication.clipboard().setText(str(table[0][0]))
 
-    def addColumnData(self):
+    def addColumnData(self) -> None:
         cursor = self.completingTextEdit.textCursor()
         cursor.select(QTextCursor.WordUnderCursor)
         selected_text = cursor.selectedText().strip()
@@ -459,6 +689,8 @@ class MainWindow(QMainWindow, Query):
             out = sqlcursor.execute(query)
             table_cols = [column[0] for column in out]
             print(f'{table_cols}\n')
+            table_cols.extend([column.upper() for column in table_cols])
+            table_cols.sort()
 
             # SQL Syntax Highlighter (Columns)
             # self.completingTextEdit.setup_editor(column=table_cols)
@@ -472,7 +704,7 @@ class MainWindow(QMainWindow, Query):
             self.completingTextEdit.setCompleter(self.completer)
             sqlcursor.close()
 
-    def toggle_table_visibility(self):
+    def toggle_table_visibility(self) -> None:
         f = False
         for i in range(self.vlayout.count()):
             if i == 0:
@@ -494,13 +726,14 @@ class MainWindow(QMainWindow, Query):
         self.glayout.setRowStretch(1,50)
         self.glayout.setRowStretch(2,50)
 
-    def fillTable(self, data: list=[]):
+    def fillTable(self, data: list=[]) -> None:
         for i in range(self.vlayout.count()):
             if i == 0:
                 continue
             child = self.vlayout.itemAt(i).widget()
+            if isinstance(child, QTableView):
             # print(child)
-            child.deleteLater()
+                child.deleteLater()
         if isinstance(data, list):
             self.scroll.setVisible(True)
             self.btn_hide.setText('Hide Table Data')
@@ -519,18 +752,20 @@ class MainWindow(QMainWindow, Query):
                 table.setModel(model)
                 horizontal_header = table.horizontalHeader()
                 vertical_header = table.verticalHeader()
-                horizontal_header.setSectionResizeMode(
-                        #QHeaderView.Interactive
-                        QHeaderView.ResizeToContents
-                        )
-                vertical_header.setSectionResizeMode(
-                        QHeaderView.Interactive
-                        )
-                horizontal_header.setStretchLastSection(False)
+                if horizontal_header:
+                    horizontal_header.setSectionResizeMode(
+                            #QHeaderView.Interactive
+                            QHeaderView.ResizeToContents
+                            )
+                    horizontal_header.setStretchLastSection(False)
+                if vertical_header:
+                    vertical_header.setSectionResizeMode(
+                            QHeaderView.Interactive
+                            )
                 cursor.close()
             return
 
-    def executeQuery(self):
+    def executeQuery(self) -> None:
         text = self.completingTextEdit.toPlainText()
         if text:
             data = self.query_exe(text)
@@ -543,7 +778,7 @@ class MainWindow(QMainWindow, Query):
         print(f'Empty: {data=}')
         return
 
-    def newFile(self):
+    def newFile(self) -> None:
         for i in range(self.vlayout.count()):
             child = self.vlayout.itemAt(i).widget()
             # print(child)
@@ -555,7 +790,7 @@ class MainWindow(QMainWindow, Query):
         self.completingTextEdit.clear()
         self.completingTextEdit.setFocus()
 
-    def openFile(self, path=""):
+    def openFile(self, path: str="") -> None:
         for i in range(self.vlayout.count()):
             child = self.vlayout.itemAt(i).widget()
             # print(child)
@@ -575,64 +810,44 @@ class MainWindow(QMainWindow, Query):
         self.glayout.setRowStretch(0,1)
         self.glayout.setRowStretch(1,50)
         self.glayout.setRowStretch(2,0)
-        text = self.completingTextEdit.toPlainText()
-        tables = {table for table in self.table_list if table in text}
-        if tables:
-            for table in tables:
-                if table not in self.all_tables:
-                    self.all_tables.append(table)
-                    sqlcursor = self.con.cursor()
-                    print(f'{self.all_tables[-1]}')
-                    query = (
-                            'SELECT name '
-                            f'FROM pragma_table_info("{table}") '
-                            'ORDER BY name;'
-                            )
-                    out = sqlcursor.execute(query)
-                    table_cols = [column[0] for column in out]
-                    print(f'{table_cols}\n')
+        self.textPasted(whole=True)
 
-                    # SQL Syntax Highlighter (Columns)
-                    # self.completingTextEdit.setup_editor(column=table_cols)
+    def create_actions(self) -> None:
+        icon = QIcon.fromTheme('document-new', QIcon(':/images/new.png'))
+        self._new_query = QAction(
+                icon,
+                "&New Query",
+                self, shortcut=QKeySequence.New,
+                statusTip="Create New Query",
+                triggered=self.newFile
+                )
 
-                    dups = set(self.completer_list)
-                    dups.update(table_cols)
-                    self.completer_list = list(dups)
-                    self.completer_list.sort(key=len)
+        icon = QIcon.fromTheme('document-open', QIcon(':/images/document-open.svg'))
+        self._open_file = QAction(
+                icon,
+                "&Open File",
+                self, shortcut=QKeySequence.Open,
+                statusTip="Open File",
+                triggered=self.openFile
+                )
 
-                    self.completerModel.setStringList(self.completer_list)
-                    self.completingTextEdit.setCompleter(self.completer)
-                    sqlcursor.close()
+        icon = QIcon.fromTheme('application-exit', QIcon(':/images/application-exit.svg'))
+        self._quit_app = QAction(
+                icon,
+                "&Quit",
+                self, shortcut="Ctrl+Q",
+                statusTip="Quit this sh**t application",
+                triggered=self.close
+                )
 
-    def createMenu(self):
+    def createMenu(self) -> None:
         file_menu = self.menuBar().addMenu(self.tr("&File"))
+        file_menu.addAction(self._new_query)
+        file_menu.addAction(self._open_file)
+        file_menu.addSeparator()
+        file_menu.addAction(self._quit_app)
 
-        new_file = file_menu.addAction(self.tr("&New..."))
-        new_file.setShortcut(QKeySequence(QKeySequence.New))
-        new_file.triggered.connect(self.newFile)
-
-
-        open_file = file_menu.addAction(self.tr("&Open..."))
-        open_file.setShortcut(QKeySequence(QKeySequence.Open))
-        open_file.triggered.connect(self.openFile)
-        return
-
-        exitAction = QAction("Exit", self)
-        aboutAct = QAction("About", self)
-        aboutQtAct = QAction("About Qt", self)
-
-        exitAction.triggered.connect(QApplication.instance().quit)
-        aboutAct.triggered.connect(self.about)
-        aboutQtAct.triggered.connect(QApplication.instance().aboutQt)
-
-        fileMenu = self.menuBar().addMenu("File")
-        fileMenu.addAction(exitAction)
-
-        helpMenu = self.menuBar().addMenu("About")
-        helpMenu.addAction(aboutAct)
-        helpMenu.addAction(aboutQtAct)
-
-    def modelFromFile(self, fileName):
+    def modelFromFile(self, fileName: str) -> QStringListModel:
         f = QFile(fileName)
         if not f.open(QFile.ReadOnly):
             return QStringListModel(self.completer)
@@ -660,83 +875,12 @@ class MainWindow(QMainWindow, Query):
                 "QCompleter class.")
 
 
-class Highlighter(QSyntaxHighlighter):
-    def __init__(self, parent=None):
-        QSyntaxHighlighter.__init__(self, parent)
-        self._mappings = {}
-
-        quotes_color = QColor("#FF0000")
-        quotes_format  = QTextCharFormat()
-        quotes_format.setForeground(quotes_color)
-        self.single = (QRegularExpression("\'"),None,1,quotes_format)
-        #self.double = (QRegularExpression("\""),None,2,quotes_format)
-
-        #startExpression = QRegularExpression("(/\\*|'|\")")
-        multiLine_color = QColor("#4d491d")
-        multiLineCommentFormat = QTextCharFormat()
-        multiLineCommentFormat.setForeground(multiLine_color)
-        startExpression = QRegularExpression("/\\*")
-        endExpression = QRegularExpression(f"\\*/")
-        self.comment = (startExpression, endExpression,3,multiLineCommentFormat)
-
-    def add_mapping(self, pattern, format):
-        self._mappings[pattern] = format
-
-    def highlightBlock(self, text):
-        pt = True
-        for pattern, format in self._mappings.items():
-            for match in re.finditer(pattern, text, re.MULTILINE):
-                if '--' in match.string:
-                    pt = False
-                start, end = match.span()
-                self.setFormat(start, end - start, format)
-
-        self.setCurrentBlockState(0)
-
-        if pt:
-            quotes_multiline =  self.match_multiline(text, *self.single)
-
-        comment_multiline = self.match_multiline(text, *self.comment)
-
-    def match_multiline(self, text, delimiter, endDelimiter, in_state, style):
-        if not endDelimiter:
-            endDelimiter = delimiter
-
-        if self.previousBlockState() == in_state:
-            start = 0
-            add = 0
-        else:
-            match = delimiter.match(text)
-            start = match.capturedStart()
-            add = match.capturedLength()
-
-        while start >= 0:
-            match = endDelimiter.match(text, start + add)
-            end =  match.capturedStart()
-            if end >= add:
-                length = end - start + match.capturedLength()
-                self.setCurrentBlockState(0)
-            else:
-                self.setCurrentBlockState(in_state)
-                length = len(text) - start + add # - match.capturedLength()
-
-            self.setFormat(start, length, style)
-            match = delimiter.match(text, start + length)
-            start = match.capturedStart()
-
-        # Return True if still inside a multi-line string, False otherwise
-        if self.currentBlockState() == in_state:
-            return True
-        else:
-            return False
-
-
 class ExecuteApp():
     def __init__(self, file: str=None):
         self.file = file
         pass
 
-    def run(self):
+    def run(self) -> None:
         import sys
 
         app = QApplication(sys.argv)
@@ -754,6 +898,6 @@ class ExecuteApp():
         sys.exit(app.exec())
 
 if __name__ == '__main__':
-    file = 'test.sql'
+    file = '../test.sql'
     app = ExecuteApp(file)
     app.run()

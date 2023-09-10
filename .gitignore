@@ -84,8 +84,4 @@ History
 .vs/
 
 # Scritps from QT examples page
-editor.py
-syntax.py
-scroll.py
-layout.py
-dockwidgets/
+examples/
